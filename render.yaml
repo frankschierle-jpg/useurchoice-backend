@@ -11,7 +11,5 @@ services:
         sync: false
       - key: CLOUDINARY_API_SECRET
         sync: false
-    disk:
-      name: models
-      mountPath: /root/.insightface
-      sizeGB: 5
+      - key: REPLICATE_API_TOKEN
+        sync: false
