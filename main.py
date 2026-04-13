@@ -1,20 +1,11 @@
 import os
 import uuid
-import shutil
-import tempfile
-import traceback
-from pathlib import Path
-
-import cv2
-import numpy as np
+import cloudinary
+import cloudinary.uploader
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import cloudinary
-import cloudinary.uploader
-import insightface
-from insightface.app import FaceAnalysis
-from insightface.model_zoo import get_model
+import replicate
 
 # ─── CONFIG ───
 cloudinary.config(
@@ -32,90 +23,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── LOAD MODELS (einmalig beim Start) ───
-print("⏳ Lade FaceAnalysis Modell...")
-face_analyzer = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
-face_analyzer.prepare(ctx_id=0, det_size=(640, 640))
-
-print("⏳ Lade Face-Swap Modell...")
-swapper = get_model("inswapper_128.onnx", download=True, download_zip=True, providers=["CPUExecutionProvider"])
-print("✅ Modelle geladen!")
-
-# ─── SPORT VIDEO URLS (Cloudinary oder direkter Link) ───
 SPORT_VIDEOS = {
-    "surf":  "https://www.pexels.com/download/video/1918465/",
-    "ski":   "https://www.pexels.com/download/video/3551954/",
-    "climb": "https://www.pexels.com/download/video/4992801/",
-    "bike":  "https://www.pexels.com/download/video/5752729/",
-    "box":   "https://www.pexels.com/download/video/4761429/",
-    "yoga":  "https://www.pexels.com/download/video/3997927/",
-    "dive":  "https://www.pexels.com/download/video/3535473/",
-    "skate": "https://www.pexels.com/download/video/4792453/",
+    "surf":  "https://videos.pexels.com/video-files/1918465/1918465-hd_1920_1080_30fps.mp4",
+    "ski":   "https://videos.pexels.com/video-files/3551954/3551954-hd_1920_1080_30fps.mp4",
+    "climb": "https://videos.pexels.com/video-files/4992801/4992801-hd_1920_1080_30fps.mp4",
+    "bike":  "https://videos.pexels.com/video-files/5752729/5752729-hd_1920_1080_30fps.mp4",
+    "box":   "https://videos.pexels.com/video-files/4761429/4761429-hd_1920_1080_30fps.mp4",
+    "yoga":  "https://videos.pexels.com/video-files/3997927/3997927-hd_1920_1080_30fps.mp4",
+    "dive":  "https://videos.pexels.com/video-files/3535473/3535473-hd_1920_1080_30fps.mp4",
+    "skate": "https://videos.pexels.com/video-files/4792453/4792453-hd_1920_1080_30fps.mp4",
 }
 
-def detect_sport_from_text(text: str) -> str:
-    """Erkennt Sportart aus dem Eingabetext."""
-    text = text.lower()
+def detect_sport(text: str) -> str:
+    t = text.lower()
     mapping = {
-        "surf": ["surf", "welle", "meer", "ozean", "beach", "bali", "hawaii"],
-        "ski":  ["ski", "schnee", "alpen", "piste", "winter", "chamonix"],
-        "climb":["kletter", "fels", "berg", "bouldern", "wand"],
-        "bike": ["bike", "fahrrad", "downhill", "trail", "mtb"],
-        "box":  ["box", "ring", "kampf", "punch", "sparring"],
-        "yoga": ["yoga", "meditation", "flow", "pose"],
-        "dive": ["tauch", "unterwasser", "koralle", "meer", "tief"],
-        "skate":["skate", "halfpipe", "trick", "board"],
+        "surf":  ["surf", "welle", "ozean", "beach", "bali", "hawaii", "meer"],
+        "ski":   ["ski", "schnee", "alpen", "piste", "winter", "snowboard"],
+        "climb": ["kletter", "fels", "berg", "bouldern", "klettern"],
+        "bike":  ["bike", "fahrrad", "downhill", "trail", "mtb", "biken"],
+        "box":   ["box", "ring", "kampf", "boxen", "sparring"],
+        "yoga":  ["yoga", "meditation", "flow", "pose"],
+        "dive":  ["tauch", "unterwasser", "koralle", "tauchen"],
+        "skate": ["skate", "halfpipe", "skateboard", "trick"],
     }
     for sport, keywords in mapping.items():
-        if any(kw in text for kw in keywords):
+        if any(kw in t for kw in keywords):
             return sport
-    return "surf"  # Default
-
-def swap_faces_in_video(source_face_img: np.ndarray, video_path: str, output_path: str):
-    """Setzt Gesicht aus source_face_img in jedes Frame des Videos ein."""
-    # Gesicht aus Quellbild extrahieren
-    source_faces = face_analyzer.get(source_face_img)
-    if not source_faces:
-        raise ValueError("Kein Gesicht im hochgeladenen Foto erkannt. Bitte ein deutliches Frontalbild verwenden.")
-    source_face = source_faces[0]
-
-    cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25
-    width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-    # Maximal 10 Sekunden verarbeiten (Performance)
-    max_frames = int(fps * 10)
-
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-
-    frame_count = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret or frame_count >= max_frames:
-            break
-
-        # Gesichter im Frame finden
-        target_faces = face_analyzer.get(frame)
-        if target_faces:
-            # Größtes Gesicht im Frame nehmen
-            target_face = max(target_faces, key=lambda f: (f.bbox[2]-f.bbox[0]) * (f.bbox[3]-f.bbox[1]))
-            frame = swapper.get(frame, target_face, source_face, paste_back=True)
-
-        out.write(frame)
-        frame_count += 1
-
-    cap.release()
-    out.release()
-    print(f"✅ {frame_count} Frames verarbeitet")
-
-# ─── ENDPOINTS ───
+    return "surf"
 
 @app.get("/")
 def root():
-    return {"status": "FaceSwap Backend läuft ✅", "version": "1.0"}
+    return {"status": "FaceSwap Backend läuft ✅"}
 
 @app.get("/health")
 def health():
@@ -123,61 +61,46 @@ def health():
 
 @app.post("/faceswap")
 async def faceswap(
-    photo: UploadFile = File(..., description="Gesichtsfoto des Users"),
-    prompt: str = Form(..., description="Textbeschreibung was der User sehen möchte"),
+    photo: UploadFile = File(...),
+    prompt: str = Form(...),
 ):
-    tmp_dir = tempfile.mkdtemp()
     try:
-        # 1. Foto einlesen
         photo_bytes = await photo.read()
-        nparr = np.frombuffer(photo_bytes, np.uint8)
-        source_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        if source_img is None:
-            raise HTTPException(status_code=400, detail="Foto konnte nicht gelesen werden.")
-
-        # 2. Sportart aus Prompt erkennen
-        sport = detect_sport_from_text(prompt)
-        print(f"📝 Prompt: '{prompt}' → Sportart: {sport}")
-
-        # 3. Passende Video-URL holen
-        video_url = SPORT_VIDEOS.get(sport, SPORT_VIDEOS["surf"])
-
-        # 4. Video herunterladen
-        import urllib.request
-        video_path = os.path.join(tmp_dir, "input.mp4")
-        print(f"⬇️ Lade Video: {video_url}")
-        req = urllib.request.Request(video_url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=30) as response:
-            with open(video_path, "wb") as f:
-                f.write(response.read())
-
-        # 5. Face-Swap durchführen
-        output_path = os.path.join(tmp_dir, f"output_{uuid.uuid4().hex}.mp4")
-        print("🔄 Starte Face-Swap...")
-        swap_faces_in_video(source_img, video_path, output_path)
-
-        # 6. Auf Cloudinary hochladen
-        print("☁️ Lade auf Cloudinary hoch...")
-        result = cloudinary.uploader.upload(
-            output_path,
-            resource_type="video",
-            public_id=f"faceswap/{uuid.uuid4().hex}",
+        upload_result = cloudinary.uploader.upload(
+            photo_bytes,
+            public_id=f"faces/temp_{uuid.uuid4().hex}",
             overwrite=True,
         )
-        video_result_url = result["secure_url"]
-        print(f"✅ Video fertig: {video_result_url}")
+        face_url = upload_result["secure_url"]
+
+        sport = detect_sport(prompt)
+        video_url = SPORT_VIDEOS.get(sport, SPORT_VIDEOS["surf"])
+
+        os.environ["REPLICATE_API_TOKEN"] = os.environ.get("REPLICATE_API_TOKEN", "")
+
+        output = replicate.run(
+            "codeplugtech/face-swap:278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
+            input={
+                "target_video": video_url,
+                "swap_image": face_url,
+            }
+        )
+
+        result_video_url = str(output)
+
+        final = cloudinary.uploader.upload(
+            result_video_url,
+            resource_type="video",
+            public_id=f"results/{uuid.uuid4().hex}",
+            overwrite=True,
+        )
 
         return JSONResponse({
             "success": True,
-            "video_url": video_result_url,
+            "video_url": final["secure_url"],
             "sport": sport,
             "prompt": prompt,
         })
 
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Fehler: {str(e)}")
-    finally:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=str(e))
