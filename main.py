@@ -1,6 +1,6 @@
 import os
 import uuid
-import random
+import base64
 import cloudinary
 import cloudinary.uploader
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
@@ -15,17 +15,10 @@ cloudinary.config(
     api_secret=os.environ.get("CLOUDINARY_API_SECRET"),
 )
 
-RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://starswap.me")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
 app = FastAPI(title="StarSwap Backend")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 SPORT_VIDEOS = {
     "surf":  "https://videos.pexels.com/video-files/1918465/1918465-hd_1920_1080_30fps.mp4",
@@ -55,6 +48,65 @@ def detect_sport(text: str) -> str:
             return sport
     return "surf"
 
+async def verify_pose_with_ai(photo_bytes: bytes, pose_text: str) -> dict:
+    """Nutzt GPT-4 Vision um zu prüfen ob die Pose im Foto stimmt."""
+    try:
+        image_b64 = base64.b64encode(photo_bytes).decode("utf-8")
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "gpt-4o",
+                    "max_tokens": 100,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"""Schau dir dieses Foto an. Die Person sollte folgende Pose zeigen: "{pose_text}"
+                                    
+Antworte NUR mit einem JSON-Objekt in diesem Format:
+{{"match": true/false, "confidence": 0-100, "reason": "kurze Erklärung auf Deutsch"}}
+
+Sei fair aber genau. Die Pose muss klar erkennbar sein."""
+                                },
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{image_b64}",
+                                        "detail": "low"
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            )
+        
+        if resp.status_code != 200:
+            print(f"OpenAI Fehler: {resp.text}")
+            return {"match": True, "confidence": 50, "reason": "KI-Prüfung nicht verfügbar"}
+        
+        data = resp.json()
+        text = data["choices"][0]["message"]["content"].strip()
+        
+        # JSON aus Antwort extrahieren
+        import json, re
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if match:
+            result = json.loads(match.group())
+            return result
+        return {"match": True, "confidence": 50, "reason": "Konnte nicht ausgewertet werden"}
+        
+    except Exception as e:
+        print(f"Pose-Prüfung Fehler: {e}")
+        return {"match": True, "confidence": 50, "reason": "KI-Prüfung übersprungen"}
+
 @app.get("/")
 def root():
     return {"status": "StarSwap Backend läuft ✅"}
@@ -63,7 +115,6 @@ def root():
 def health():
     return {"status": "ok"}
 
-# ─── FOTO HOCHLADEN (Model Registrierung) ───
 @app.post("/model/upload-photo")
 async def upload_model_photo(
     photo: UploadFile = File(...),
@@ -76,35 +127,48 @@ async def upload_model_photo(
             public_id=f"models/{email.replace('@','_').replace('.','_')}/face_{uuid.uuid4().hex[:8]}",
             overwrite=False,
         )
-        return JSONResponse({
-            "success": True,
-            "photo_url": result["secure_url"],
-        })
+        return JSONResponse({"success": True, "photo_url": result["secure_url"]})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ─── VERIFIKATION ───
-@app.post("/model/verify")
-async def verify_model(
+@app.post("/model/verify-pose")
+async def verify_pose(
     photo: UploadFile = File(...),
+    pose_text: str = Form(...),
     email: str = Form(...),
 ):
+    """Prüft ob das Foto die geforderte Pose zeigt (GPT-4 Vision)."""
     try:
         photo_bytes = await photo.read()
-        result = cloudinary.uploader.upload(
+        
+        # KI-Abgleich
+        result = await verify_pose_with_ai(photo_bytes, pose_text)
+        
+        if not result.get("match") and result.get("confidence", 100) > 60:
+            return JSONResponse({
+                "success": False,
+                "verified": False,
+                "confidence": result.get("confidence", 0),
+                "reason": result.get("reason", "Pose nicht erkannt"),
+            })
+        
+        # Foto auf Cloudinary speichern
+        upload = cloudinary.uploader.upload(
             photo_bytes,
             public_id=f"verified/{email.replace('@','_').replace('.','_')}_{uuid.uuid4().hex[:8]}",
             overwrite=False,
         )
+        
         return JSONResponse({
             "success": True,
             "verified": True,
-            "photo_url": result["secure_url"],
+            "confidence": result.get("confidence", 100),
+            "reason": result.get("reason", "Pose erkannt"),
+            "photo_url": upload["secure_url"],
         })
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ─── FACE SWAP ───
 @app.post("/faceswap")
 async def faceswap(
     prompt: str = Form(...),
@@ -114,20 +178,12 @@ async def faceswap(
         sport = detect_sport(prompt)
         video_url = SPORT_VIDEOS.get(sport, SPORT_VIDEOS["surf"])
 
-        print(f"Face URL: {face_url}")
-        print(f"Video URL: {video_url}")
-        print(f"Sport: {sport}")
-
         output = replicate.run(
             "codeplugtech/face-swap:278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
-            input={
-                "target_video": video_url,
-                "swap_image": face_url,
-            }
+            input={"target_video": video_url, "swap_image": face_url}
         )
 
         result_video_url = str(output)
-
         final = cloudinary.uploader.upload(
             result_video_url,
             resource_type="video",
