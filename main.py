@@ -237,12 +237,23 @@ async def faceswap(prompt: str = Form(...), face_url: str = Form(...)):
         print(f"Face-swap output: {output}")
         
         result_url = str(output)
-        final = cloudinary.uploader.upload(
-            result_url, resource_type="video",
-            public_id=f"results/{uuid.uuid4().hex}", overwrite=True,
-        )
+        print(f"Replicate result: {result_url}")
         
-        return JSONResponse({"success": True, "video_url": final["secure_url"], "sport": sport})
+        # Cloudinary Upload — resource_type auto erkennt ob video oder bild
+        try:
+            final = cloudinary.uploader.upload(
+                result_url,
+                resource_type="auto",
+                public_id=f"results/{uuid.uuid4().hex}",
+                overwrite=True,
+            )
+            final_url = final["secure_url"]
+        except Exception as cu:
+            print(f"Cloudinary upload fehler: {cu}")
+            # Direkt Replicate URL zurückgeben
+            final_url = result_url
+        
+        return JSONResponse({"success": True, "video_url": final_url, "sport": sport})
     except HTTPException:
         raise
     except Exception as e:
