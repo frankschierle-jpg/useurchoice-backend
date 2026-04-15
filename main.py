@@ -187,7 +187,7 @@ async def search_videos(prompt: str, count: int = 3):
         sport = detect_sport(prompt)
         
         # Suchbegriffe für Pexels basierend auf Prompt-Details
-        search_query = build_pexels_query(prompt, sport)
+        search_query = await build_pexels_query_with_gemini(prompt, sport)
         
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
@@ -233,9 +233,23 @@ async def search_videos(prompt: str, count: int = 3):
                 if not best_file:
                     continue
                     
+                # Schönen Titel generieren
+                raw_title = v.get("url", "").split("/")[-2]
+                # Zahlen am Ende entfernen
+                import re
+                clean_title = re.sub(r'-\d+$', '', raw_title).replace("-", " ").title()
+                if not clean_title or len(clean_title) < 3:
+                    sport_titles = {
+                        "surf": "Surfing Video", "ski": "Skiing Video",
+                        "climb": "Climbing Video", "bike": "MTB Video",
+                        "box": "Boxing Video", "yoga": "Yoga Video",
+                        "dive": "Diving Video", "skate": "Skate Video",
+                    }
+                    clean_title = sport_titles.get(sport, "Sport Video")
+
                 result.append({
                     "id": str(v["id"]),
-                    "title": v.get("url", "").split("/")[-2].replace("-", " ").title(),
+                    "title": clean_title,
                     "thumb": v.get("image", ""),
                     "videoUrl": best_file.get("link", ""),
                     "duration": v.get("duration", 30),
@@ -266,10 +280,36 @@ def build_pexels_query(prompt: str, sport: str) -> str:
     
     # Stimmungen erkennen  
     moods = {
+        # Zeit
         "nacht": "night", "sonnenuntergang": "sunset", "sonnenaufgang": "sunrise",
-        "sturm": "storm", "gruppe": "group", "solo": "alone", "extrem": "extreme",
-        "anfänger": "beginner", "profi": "professional", "wipeout": "wipeout",
-        "hai": "shark", "delfin": "dolphin", "schnee": "snow powder",
+        "morgen": "morning", "abend": "evening", "mittag": "midday",
+        # Wetter
+        "sturm": "storm", "regen": "rain", "nebel": "fog", "wind": "wind",
+        # Gruppe
+        "gruppe": "group", "solo": "alone", "allein": "alone", "zusammen": "together",
+        # Schwierigkeit
+        "extrem": "extreme", "anfänger": "beginner", "profi": "professional",
+        # Surf spezifisch
+        "wipeout": "wipeout", "falle": "wipeout", "fallen": "wipeout", "stürze": "wipeout",
+        "sturz": "wipeout", "hinfallen": "wipeout", "umfallen": "wipeout",
+        "riesenwelle": "big wave", "große welle": "big wave", "riesig": "big wave",
+        "barrel": "barrel wave", "tube": "tube wave", "röhre": "barrel wave",
+        # Tiere
+        "hai": "shark", "delfin": "dolphin", "wal": "whale", "robbe": "seal",
+        "schildkröte": "turtle", "fisch": "fish",
+        # Orte
+        "strand": "beach", "felsen": "rocks", "klippe": "cliff",
+        # Ski spezifisch
+        "schnee": "powder snow", "tiefschnee": "powder", "lawine": "avalanche",
+        "sprung": "jump ski", "trick": "trick",
+        # Klettern spezifisch  
+        "steil": "steep cliff", "überhang": "overhang", "gipfel": "summit",
+        # Box spezifisch
+        "knockout": "knockout", "treffer": "punch", "kampf": "fight",
+        # Yoga spezifisch
+        "entspannung": "relaxation", "meditation": "meditation", "gleichgewicht": "balance",
+        # Tauchen spezifisch
+        "koralle": "coral reef", "tief": "deep sea", "wrack": "shipwreck",
     }
     
     sport_terms = {
@@ -369,7 +409,7 @@ async def faceswap(
             pexels_key = os.environ.get("PEXELS_API_KEY", "")
             if pexels_key:
                 async with httpx.AsyncClient(timeout=10) as client:
-                    search_query = build_pexels_query(prompt, sport)
+                    search_query = await build_pexels_query_with_gemini(prompt, sport)
                     resp = await client.get(
                         "https://api.pexels.com/videos/search",
                         headers={"Authorization": pexels_key},
