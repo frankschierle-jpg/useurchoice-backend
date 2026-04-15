@@ -209,26 +209,41 @@ async def faceswap(prompt: str = Form(...), face_url: str = Form(...)):
         
         print(f"video_url: {video_url}")
         
-        # Cloudinary URL auf PNG umstellen (Replicate mag kein JPG redirect)
-        face_url_png = face_url
-        if "cloudinary.com" in face_url:
-            # Format: .../upload/... → .../upload/f_png/...
-            face_url_png = face_url.replace("/upload/", "/upload/f_png,q_auto/")
-            # Extension ändern
-            if face_url_png.endswith(".jpg") or face_url_png.endswith(".jpeg"):
-                face_url_png = face_url_png.rsplit(".", 1)[0] + ".png"
+        print(f"Starting face swap with face_url: {face_url}")
+        print(f"Video URL: {video_url}")
         
-        print(f"face_url_png: {face_url_png}")
-        
-        # Face-Swap
-        output = replicate.run(
-            "codeplugtech/face-swap:278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
-            input={
-                "target_video": video_url,
-                "swap_image": face_url_png,
-                "input_image": face_url_png,
-            }
-        )
+        # Modell 1: lucataco/faceswap (unterstützt JPG/PNG, video)
+        try:
+            output = replicate.run(
+                "lucataco/faceswap:9a4298548422074c3f57258c5d544497a19901a7ac34fb374f4b9f36c1dfc780",
+                input={
+                    "target_video": video_url,
+                    "source_image": face_url,
+                }
+            )
+            print(f"Modell 1 erfolgreich: {output}")
+        except Exception as e1:
+            print(f"Modell 1 fehlgeschlagen: {e1}")
+            # Modell 2: Fallback
+            try:
+                output = replicate.run(
+                    "deepfakes/faceswap:latest",
+                    input={
+                        "target_video": video_url,
+                        "source_face": face_url,
+                    }
+                )
+            except Exception as e2:
+                print(f"Modell 2 fehlgeschlagen: {e2}")
+                # Modell 3: Original mit beiden Parametern
+                output = replicate.run(
+                    "codeplugtech/face-swap:278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
+                    input={
+                        "target_video": video_url,
+                        "swap_image": face_url,
+                        "input_image": face_url,
+                    }
+                )
         
         result_url = str(output)
         final = cloudinary.uploader.upload(
