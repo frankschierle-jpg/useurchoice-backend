@@ -227,35 +227,51 @@ async def faceswap(prompt: str = Form(...), face_url: str = Form(...)):
         
         # Sport-Szene Prompt auf Englisch übersetzen für Kling
         sport_prompts = {
-            "surf": "person surfing on ocean waves, action sport, cinematic",
-            "ski": "person skiing down snowy mountain slope, action sport, cinematic",
-            "climb": "person rock climbing on steep cliff, action sport, cinematic",
-            "bike": "person mountain biking on trail, action sport, cinematic",
-            "box": "person boxing in ring, action sport, cinematic",
-            "yoga": "person doing yoga poses, peaceful, cinematic",
-            "dive": "person scuba diving underwater coral reef, cinematic",
-            "skate": "person skateboarding tricks, urban sport, cinematic",
+            "surf": "The person in the reference image is surfing massive ocean waves in Bali, wearing a wetsuit, riding a surfboard, dramatic ocean spray, sunny day, action sports photography",
+            "ski": "The person in the reference image is skiing down a steep snowy mountain, wearing ski gear and helmet, powder snow flying, alpine scenery, fast action sports",
+            "climb": "The person in the reference image is rock climbing on a dramatic vertical cliff face, wearing climbing harness and helmet, reaching for a hold, mountain backdrop, extreme sport",
+            "bike": "The person in the reference image is mountain biking downhill on a forest trail, wearing helmet and protective gear, jumping over a rocky section, action sport",
+            "box": "The person in the reference image is boxing in a professional ring, wearing boxing gloves and shorts, throwing a powerful punch, dramatic lighting, sports action",
+            "yoga": "The person in the reference image is doing advanced yoga poses on a peaceful beach at sunrise, wearing yoga clothes, serene atmosphere",
+            "dive": "The person in the reference image is scuba diving underwater in a tropical coral reef, wearing diving gear, surrounded by colorful fish and coral",
+            "skate": "The person in the reference image is skateboarding in an urban skatepark, wearing protective gear, performing a trick on a halfpipe, action sports",
         }
         
-        # Gemini für besseren Prompt nutzen
-        video_prompt = sport_prompts.get(sport, f"person doing {sport}, action sport, cinematic")
+        # Gemini baut aus Schlagworten einen perfekten Kling-Prompt
+        base_prompt = sport_prompts.get(sport, f"person doing {sport}, action sport, cinematic")
+        video_prompt = base_prompt
         try:
             gemini_key = os.environ.get("GEMINI_API_KEY", "")
             if gemini_key:
                 async with httpx.AsyncClient(timeout=10) as client:
                     resp = await client.post(
                         f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}",
-                        json={"contents": [{"parts": [{"text": f"""Create a short English video generation prompt (max 20 words) for Kling AI based on:
-User request: "{prompt}"
-Sport: {sport}
-The prompt should describe an action sport scene with a person. Be specific and cinematic.
-Reply ONLY with the prompt."""}]}]}
+                        json={"contents": [{"parts": [{"text": f"""You are a video prompt engineer for Kling AI (image-to-video model).
+                        
+The user uploaded a face photo as reference image. Create a detailed English prompt that:
+1. Starts with "The person in the reference image is..."
+2. Places them in an action sport scene
+3. Includes all details from the user's keywords
+
+User keywords: "{prompt}"
+Detected sport: {sport}
+Base scene: {base_prompt}
+
+Rules:
+- Max 40 words
+- Very specific about the sport action
+- Include location, lighting, mood from keywords
+- Make it cinematic and dynamic
+- Reply ONLY with the prompt, nothing else"""}]}]}
                     )
                     if resp.status_code == 200:
                         video_prompt = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                        # Anführungszeichen entfernen falls vorhanden
+                        video_prompt = video_prompt.strip('"').strip("'")
                         print(f"Gemini video prompt: {video_prompt}")
         except Exception as ge:
             print(f"Gemini prompt error: {ge}")
+            video_prompt = base_prompt
 
         print(f"Using video prompt: {video_prompt}")
         
@@ -282,6 +298,50 @@ Reply ONLY with the prompt."""}]}]}
         
         print(f"result_url: {result_url}")
         
+        # Audio generieren mit MusicGen
+        audio_url = None
+        try:
+            # Musik-Prompt basierend auf Sport und Stimmung
+            # Realistische Umgebungsgeräusche statt Musik
+            sound_prompts = {
+                "surf": "ocean waves crashing, seagulls calling, wind on beach, water splashing, surfer breathing heavily",
+                "ski": "wind howling on mountain, skis on snow, heavy breathing, snow crunching, distant avalanche rumble",
+                "climb": "wind on mountain cliff, heavy breathing and grunting, rocks scraping, rope tension sounds, birds of prey calling, distant thunder",
+                "bike": "mountain bike wheels on gravel trail, heavy breathing, wind rushing, chain rattling, leaves rustling",
+                "box": "boxing gloves hitting, heavy breathing and grunting, gym ambience, crowd cheering, punching bag impact",
+                "yoga": "birds singing, gentle breeze, peaceful nature sounds, calm breathing, distant water stream",
+                "dive": "underwater bubbles, scuba breathing regulator, ocean ambience, fish swimming, deep water pressure sounds",
+                "skate": "skateboard wheels on concrete, urban street sounds, crowd cheering, board tricks landing, city ambience",
+            }
+            music_prompt = sound_prompts.get(sport, "outdoor sport ambient sounds, heavy breathing, nature")
+            
+            # User-Prompt für Stimmungsanpassung
+            if any(w in prompt.lower() for w in ["nacht","night","dunkel","dark"]):
+                music_prompt += ", night crickets, owls, dark atmospheric sounds"
+            if any(w in prompt.lower() for w in ["regen","rain","sturm","storm"]):
+                music_prompt += ", rain falling, thunder in distance, wet surface sounds"
+            if any(w in prompt.lower() for w in ["extrem","extreme","wild","crazy"]):
+                music_prompt += ", intense heavy breathing, adrenaline rush sounds"
+            if any(w in prompt.lower() for w in ["gruppe","group","team"]):
+                music_prompt += ", multiple people breathing, team cheering"
+                
+            print(f"Music prompt: {music_prompt}")
+            
+            audio_output = replicate.run(
+                "meta/musicgen:671ac645ce5e552cc63a54a2bbff63fcf798043055d2dac5fc9e36a837eedcfb",
+                input={
+                    "prompt": music_prompt,
+                    "duration": 8,
+                    "model_version": "stereo-melody-large",
+                    "output_format": "mp3",
+                }
+            )
+            if audio_output:
+                audio_url = str(audio_output)
+                print(f"Audio URL: {audio_url}")
+        except Exception as ae:
+            print(f"Audio generation error: {ae}")
+        
         print(f"Replicate result: {result_url}")
         
         # Cloudinary Upload — resource_type auto erkennt ob video oder bild
@@ -298,7 +358,13 @@ Reply ONLY with the prompt."""}]}]}
             # Direkt Replicate URL zurückgeben
             final_url = result_url
         
-        return JSONResponse({"success": True, "video_url": final_url, "sport": sport})
+        return JSONResponse({
+            "success": True, 
+            "video_url": final_url, 
+            "audio_url": audio_url,
+            "sport": sport,
+            "prompt_used": video_prompt,
+        })
     except HTTPException:
         raise
     except Exception as e:
