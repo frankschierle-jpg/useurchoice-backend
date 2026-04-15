@@ -429,9 +429,13 @@ async def faceswap(
         except Exception as pe:
             print(f"Pexels Fehler: {pe}")
 
+        # Replicate face-swap model
         output = replicate.run(
             "codeplugtech/face-swap:278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
-            input={"target_video": video_url, "swap_image": face_url}
+            input={
+                "target_video": video_url,
+                "input_image": face_url,
+            }
         )
 
         result_video_url = str(output)
