@@ -209,10 +209,14 @@ async def faceswap(prompt: str = Form(...), face_url: str = Form(...)):
         
         print(f"video_url: {video_url}")
         
-        # Face-Swap
+        # Face-Swap — beide Parameter übergeben
         output = replicate.run(
             "codeplugtech/face-swap:278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
-            input={"target_video": video_url, "swap_image": face_url}
+            input={
+                "target_video": video_url,
+                "swap_image": face_url,
+                "input_image": face_url,
+            }
         )
         
         result_url = str(output)
