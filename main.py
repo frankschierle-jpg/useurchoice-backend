@@ -278,12 +278,12 @@ Rules:
         # Schritt 1: Kling generiert Sport-Video (ohne Gesicht)
         print(f"Schritt 1 - Generiere Sport-Video: {video_prompt}")
         kling_output = replicate.run(
-            "kwaivgi/kling-v2.1",
+            "kwaivgi/kling-v1.6-standard",
             input={
                 "prompt": video_prompt,
-                "duration": 5,
+                "duration": "5",
                 "aspect_ratio": "16:9",
-                "negative_prompt": "blurry, low quality, text, watermark",
+                "negative_prompt": "blurry, low quality, text, watermark, face",
             }
         )
         
