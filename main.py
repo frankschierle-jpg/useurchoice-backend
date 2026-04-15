@@ -225,27 +225,53 @@ async def faceswap(prompt: str = Form(...), face_url: str = Form(...)):
             
         print(f"face_url_png: {face_url_png}")
         
-        # Video Face Swap mit yan-ops/face-swap
-        try:
-            output = replicate.run(
-                "yan-ops/face-swap:v2.1",
-                input={
-                    "target": video_url,
-                    "source": face_url_png,
-                }
-            )
-        except Exception as e1:
-            print(f"yan-ops fehlgeschlagen: {e1}")
-            # Fallback: omniedgeio
-            output = replicate.run(
-                "omniedgeio/face-swap:v1.0",
-                input={
-                    "video": video_url,
-                    "image": face_url_png,
-                }
-            )
+        # Sport-Szene Prompt auf Englisch übersetzen für Kling
+        sport_prompts = {
+            "surf": "person surfing on ocean waves, action sport, cinematic",
+            "ski": "person skiing down snowy mountain slope, action sport, cinematic",
+            "climb": "person rock climbing on steep cliff, action sport, cinematic",
+            "bike": "person mountain biking on trail, action sport, cinematic",
+            "box": "person boxing in ring, action sport, cinematic",
+            "yoga": "person doing yoga poses, peaceful, cinematic",
+            "dive": "person scuba diving underwater coral reef, cinematic",
+            "skate": "person skateboarding tricks, urban sport, cinematic",
+        }
         
-        print(f"Face-swap raw output: {output}")
+        # Gemini für besseren Prompt nutzen
+        video_prompt = sport_prompts.get(sport, f"person doing {sport}, action sport, cinematic")
+        try:
+            gemini_key = os.environ.get("GEMINI_API_KEY", "")
+            if gemini_key:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    resp = await client.post(
+                        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}",
+                        json={"contents": [{"parts": [{"text": f"""Create a short English video generation prompt (max 20 words) for Kling AI based on:
+User request: "{prompt}"
+Sport: {sport}
+The prompt should describe an action sport scene with a person. Be specific and cinematic.
+Reply ONLY with the prompt."""}]}]}
+                    )
+                    if resp.status_code == 200:
+                        video_prompt = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                        print(f"Gemini video prompt: {video_prompt}")
+        except Exception as ge:
+            print(f"Gemini prompt error: {ge}")
+
+        print(f"Using video prompt: {video_prompt}")
+        
+        # Kling v2.1 — Image-to-Video mit Gesichtsfoto als Referenz
+        output = replicate.run(
+            "kwaivgi/kling-v2.1",
+            input={
+                "prompt": video_prompt,
+                "start_image": face_url_png,
+                "duration": 5,
+                "aspect_ratio": "16:9",
+                "negative_prompt": "blurry, low quality, distorted face",
+            }
+        )
+        
+        print(f"Kling output: {output}")
         
         if isinstance(output, list):
             result_url = str(output[0])
