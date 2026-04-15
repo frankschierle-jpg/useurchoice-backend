@@ -278,12 +278,12 @@ Rules:
         # Schritt 1: Kling generiert Sport-Video (ohne Gesicht)
         print(f"Schritt 1 - Generiere Sport-Video: {video_prompt}")
         kling_output = replicate.run(
-            "kwaivgi/kling-v1.6-standard",
+            "bytedance/seedance-1-lite",
             input={
                 "prompt": video_prompt,
-                "duration": "5",
+                "duration": 5,
+                "resolution": "720p",
                 "aspect_ratio": "16:9",
-                "negative_prompt": "blurry, low quality, text, watermark, face",
             }
         )
         
