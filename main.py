@@ -225,18 +225,37 @@ async def faceswap(prompt: str = Form(...), face_url: str = Form(...)):
             
         print(f"face_url_png: {face_url_png}")
         
-        # Face-Swap mit codeplugtech/face-swap
-        output = replicate.run(
-            "codeplugtech/face-swap:278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
-            input={
-                "target_video": video_url,
-                "swap_image": face_url_png,
-                "input_image": face_url_png,
-            }
-        )
-        print(f"Face-swap output: {output}")
+        # Video Face Swap mit yan-ops/face-swap
+        try:
+            output = replicate.run(
+                "yan-ops/face-swap:v2.1",
+                input={
+                    "target": video_url,
+                    "source": face_url_png,
+                }
+            )
+        except Exception as e1:
+            print(f"yan-ops fehlgeschlagen: {e1}")
+            # Fallback: omniedgeio
+            output = replicate.run(
+                "omniedgeio/face-swap:v1.0",
+                input={
+                    "video": video_url,
+                    "image": face_url_png,
+                }
+            )
         
-        result_url = str(output)
+        print(f"Face-swap raw output: {output}")
+        
+        if isinstance(output, list):
+            result_url = str(output[0])
+        elif hasattr(output, 'url'):
+            result_url = str(output.url)
+        else:
+            result_url = str(output)
+        
+        print(f"result_url: {result_url}")
+        
         print(f"Replicate result: {result_url}")
         
         # Cloudinary Upload — resource_type auto erkennt ob video oder bild
