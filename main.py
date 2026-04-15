@@ -144,12 +144,16 @@ async def verify_pose(
         # KI-Abgleich
         result = await verify_pose_with_ai(photo_bytes, pose_text)
         
-        if not result.get("match") and result.get("confidence", 100) > 60:
+        confidence = result.get("confidence", 50)
+        match = result.get("match", True)
+        
+        # Nur ablehnen wenn KI sehr sicher ist dass Pose falsch ist
+        if not match and confidence > 75:
             return JSONResponse({
                 "success": False,
                 "verified": False,
-                "confidence": result.get("confidence", 0),
-                "reason": result.get("reason", "Pose nicht erkannt"),
+                "confidence": confidence,
+                "reason": result.get("reason", "Pose nicht erkannt — bitte nochmal versuchen"),
             })
         
         # Foto auf Cloudinary speichern
