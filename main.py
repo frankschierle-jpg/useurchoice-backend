@@ -277,13 +277,11 @@ Rules:
         
         # Schritt 1: Kling generiert Sport-Video (ohne Gesicht)
         print(f"Schritt 1 - Generiere Sport-Video: {video_prompt}")
+        # Seedance-1-lite: text-to-video, nur prompt nötig
         kling_output = replicate.run(
             "bytedance/seedance-1-lite",
             input={
                 "prompt": video_prompt,
-                "duration": 5,
-                "resolution": "720p",
-                "aspect_ratio": "16:9",
             }
         )
         
