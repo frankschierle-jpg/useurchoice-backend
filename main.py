@@ -275,26 +275,48 @@ Rules:
 
         print(f"Using video prompt: {video_prompt}")
         
-        # Kling v2.1 — Image-to-Video mit Gesichtsfoto als Referenz
-        output = replicate.run(
+        # Schritt 1: Kling generiert Sport-Video (ohne Gesicht)
+        print(f"Schritt 1 - Generiere Sport-Video: {video_prompt}")
+        kling_output = replicate.run(
             "kwaivgi/kling-v2.1",
             input={
                 "prompt": video_prompt,
-                "start_image": face_url_png,
                 "duration": 5,
                 "aspect_ratio": "16:9",
-                "negative_prompt": "blurry, low quality, distorted face",
+                "negative_prompt": "blurry, low quality, text, watermark",
             }
         )
         
-        print(f"Kling output: {output}")
-        
-        if isinstance(output, list):
-            result_url = str(output[0])
-        elif hasattr(output, 'url'):
-            result_url = str(output.url)
+        if isinstance(kling_output, list):
+            sport_video_url = str(kling_output[0])
+        elif hasattr(kling_output, 'url'):
+            sport_video_url = str(kling_output.url)
         else:
-            result_url = str(output)
+            sport_video_url = str(kling_output)
+            
+        print(f"Schritt 1 fertig - Sport video: {sport_video_url}")
+        
+        # Schritt 2: xrunda/hello — echter Video Face-Swap
+        print(f"Schritt 2 - Video Face-Swap: {face_url_png}")
+        faceswap_output = replicate.run(
+            "xrunda/hello:104b4a39315349db50880757bc8c1c996c5309e3aa11286b0a3c84dab81fd440",
+            input={
+                "source": sport_video_url,
+                "target": face_url_png,
+            }
+        )
+        
+        if isinstance(faceswap_output, list):
+            output = str(faceswap_output[0])
+        elif hasattr(faceswap_output, 'url'):
+            output = str(faceswap_output.url)
+        else:
+            output = str(faceswap_output)
+            
+        print(f"Schritt 2 fertig - output: {output}")
+        
+        print(f"Video output: {output}")
+        result_url = str(output)
         
         print(f"result_url: {result_url}")
         
