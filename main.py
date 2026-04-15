@@ -209,13 +209,24 @@ async def faceswap(prompt: str = Form(...), face_url: str = Form(...)):
         
         print(f"video_url: {video_url}")
         
-        # Face-Swap — beide Parameter übergeben
+        # Cloudinary URL auf PNG umstellen (Replicate mag kein JPG redirect)
+        face_url_png = face_url
+        if "cloudinary.com" in face_url:
+            # Format: .../upload/... → .../upload/f_png/...
+            face_url_png = face_url.replace("/upload/", "/upload/f_png,q_auto/")
+            # Extension ändern
+            if face_url_png.endswith(".jpg") or face_url_png.endswith(".jpeg"):
+                face_url_png = face_url_png.rsplit(".", 1)[0] + ".png"
+        
+        print(f"face_url_png: {face_url_png}")
+        
+        # Face-Swap
         output = replicate.run(
             "codeplugtech/face-swap:278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
             input={
                 "target_video": video_url,
-                "swap_image": face_url,
-                "input_image": face_url,
+                "swap_image": face_url_png,
+                "input_image": face_url_png,
             }
         )
         
