@@ -212,13 +212,26 @@ async def faceswap(prompt: str = Form(...), face_url: str = Form(...)):
         print(f"Starting face swap with face_url: {face_url}")
         print(f"Video URL: {video_url}")
         
+        # Cloudinary URL zu PNG konvertieren
+        if "cloudinary.com" in face_url and "/image/upload/" in face_url:
+            parts = face_url.split("/image/upload/")
+            face_url_png = parts[0] + "/image/upload/f_png/" + parts[1]
+            # Extension ersetzen
+            if "." in face_url_png.split("/")[-1]:
+                base = face_url_png.rsplit(".", 1)[0]
+                face_url_png = base + ".png"
+        else:
+            face_url_png = face_url
+            
+        print(f"face_url_png: {face_url_png}")
+        
         # Face-Swap mit codeplugtech/face-swap
         output = replicate.run(
             "codeplugtech/face-swap:278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
             input={
                 "target_video": video_url,
-                "swap_image": face_url,
-                "input_image": face_url,
+                "swap_image": face_url_png,
+                "input_image": face_url_png,
             }
         )
         print(f"Face-swap output: {output}")
